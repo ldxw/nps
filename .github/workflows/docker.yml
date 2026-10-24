@@ -1,8 +1,10 @@
-# 手动触发：构建 nps 镜像，多架构（amd64 / arm64），只推送到 GitHub Container Registry。
+# 手动触发：构建 nps（服务端）与 npc（客户端）镜像，多架构（amd64 / arm64），只推送到 GitHub Container Registry。
 #
-# 标签规则：默认标签 latest + 版本号（例如 v0.26.39）
-#   版本号默认读 lib/version/version.go 里的 VERSION，也可在手动触发时填写（0.27.0 或 v0.27.0 都行）。
+# 镜像与标签：
+#   ghcr.io/<owner>/nps:latest  +  ghcr.io/<owner>/nps:v0.26.39
+#   ghcr.io/<owner>/npc:latest  +  ghcr.io/<owner>/npc:v0.26.39
 #
+# 版本号默认读 lib/version/version.go 里的 VERSION，也可在手动触发时填写（0.27.0 或 v0.27.0 都行）。
 # 首次推送后包默认是私有的，需要在仓库 Packages 页面把可见性改成 Public。
 
 name: Docker
@@ -34,6 +36,15 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: nps
+            dockerfile: ./Dockerfile.nps
+          - name: npc
+            dockerfile: ./Dockerfile.npc
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +54,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          image="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/${{ matrix.name }}"
 
           version='${{ github.event.inputs.version }}'
           if [ -z "$version" ]; then
@@ -77,7 +89,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile.nps
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
           # 避免向仓库推送 attestations，部分镜像仓库解析不了
@@ -88,5 +100,5 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.image }}:latest
             ${{ steps.meta.outputs.image }}:v${{ steps.meta.outputs.version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
