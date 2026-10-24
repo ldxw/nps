@@ -20,40 +20,103 @@
                         </div>
                     </div>
                     <div class="form-group">
-                        <label class="control-label font-bold" langtag="word-host"></label>
-                        <div class="col-sm-10">
-                            <input value="{{.h.Host}}" class="form-control" type="text" name="host" placeholder="" langtag="info-suchashost" list="web-domains">
-                            {{if .domains}}
-                            <datalist id="web-domains">
-                                {{range .domains}}
-                                <option value="{{.Name}}"></option>
-                                {{end}}
-                            </datalist>
-                            <small class="help-block">可选域名来自 nps.conf 的 [web_domains] 配置，选中后会自动填好证书和私钥路径</small>
-                            <script>
-                                var NP_WEB_DOMAINS = {
-                                    {{range $i, $d := .domains}}{{if $i}},{{end}}"{{$d.Name}}": {cert: "{{$d.Cert}}", key: "{{$d.Key}}"}{{end}}
-                                };
-                                (function () {
-                                    var hostInput = document.querySelector('input[name="host"]');
-                                    if (!hostInput) { return; }
-                                    function fillFromDomain() {
-                                        var conf = NP_WEB_DOMAINS[hostInput.value];
-                                        if (!conf) { return; }
-                                        var cert = document.getElementById('pemText');
-                                        var key = document.getElementById('pemKey');
-                                        // 只在为空时自动填，避免覆盖用户已粘贴的内容
-                                        if (cert && conf.cert && !cert.value.trim()) { cert.value = conf.cert; }
-                                        if (key && conf.key && !key.value.trim()) { key.value = conf.key; }
-                                    }
-                                    hostInput.addEventListener('change', fillFromDomain);
-                                    hostInput.addEventListener('blur', fillFromDomain);
-                                })();
-                            </script>
-                            {{end}}
-                        </div>
-                    </div>
-                    <div class="form-group" id="scheme">
+                          <label class="control-label font-bold" langtag="word-host"></label>
+                          <div class="col-sm-10">
+                              <div class="input-group">
+                                  <input id="host-prefix" class="form-control" type="text"
+                                         placeholder="填写域名前缀，如 abc 或 *" autocomplete="off">
+                                  <span class="input-group-addon" id="host-suffix-label" style="display:none"></span>
+                              </div>
+                              <select id="host-suffix" class="form-control" style="margin-top:8px">
+                                  <option value="">不使用固定后缀（直接填完整域名）</option>
+                                  {{range .domains}}
+                                  <option value="{{.Name}}" data-cert="{{.Cert}}" data-key="{{.Key}}">{{.Name}}</option>
+                                  {{end}}
+                              </select>
+                              <small class="help-block">先选后缀再填前缀；前缀留空表示直接用后缀本身，填 <b>*</b> 表示泛解析</small>
+                              <input type="hidden" name="host" id="host-full" value="{{if .h}}{{.h.Host}}{{end}}">
+                              <script>
+                                  (function () {
+                                      var prefixInput = document.getElementById('host-prefix');
+                                      var suffixSelect = document.getElementById('host-suffix');
+                                      var suffixLabel = document.getElementById('host-suffix-label');
+                                      var hostFull = document.getElementById('host-full');
+                                      if (!prefixInput || !suffixSelect || !hostFull) { return; }
+
+                                      function baseOf(suffix) {
+                                          // 后缀写成 *.a.com 时取 a.com，避免拼出 abc.*.a.com
+                                          return suffix.indexOf('*.') === 0 ? suffix.slice(2) : suffix;
+                                      }
+
+                                      function compose() {
+                                          var suffix = suffixSelect.value;
+                                          var prefix = prefixInput.value.trim();
+                                          if (!suffix) {
+                                              suffixLabel.style.display = 'none';
+                                              hostFull.value = prefix;
+                                              return;
+                                          }
+                                          var base = baseOf(suffix);
+                                          suffixLabel.textContent = '.' + base;
+                                          suffixLabel.style.display = '';
+                                          hostFull.value = prefix === '' ? base : prefix + '.' + base;
+                                      }
+
+                                      // 记录上一次自动填入的路径：切换后缀时能跟着换，
+                                      // 但用户手动粘贴过的内容不会被覆盖
+                                      var lastCert = '';
+                                      var lastKey = '';
+
+                                      function fillCert() {
+                                          var opt = suffixSelect.options[suffixSelect.selectedIndex];
+                                          if (!opt) { return; }
+                                          var cert = document.getElementById('pemText');
+                                          var key = document.getElementById('pemKey');
+                                          var c = opt.getAttribute('data-cert') || '';
+                                          var k = opt.getAttribute('data-key') || '';
+                                          if (cert && c && (!cert.value.trim() || cert.value === lastCert)) {
+                                              cert.value = c;
+                                              lastCert = c;
+                                          }
+                                          if (key && k && (!key.value.trim() || key.value === lastKey)) {
+                                              key.value = k;
+                                              lastKey = k;
+                                          }
+                                      }
+
+                                      // 编辑页：把已有域名拆回“前缀 + 后缀”
+                                      function splitExisting() {
+                                          var full = (hostFull.value || '').trim();
+                                          if (!full) { return; }
+                                          for (var i = 0; i < suffixSelect.options.length; i++) {
+                                              var opt = suffixSelect.options[i];
+                                              if (!opt.value) { continue; }
+                                              var base = baseOf(opt.value);
+                                              if (full === base) {
+                                                  suffixSelect.selectedIndex = i;
+                                                  prefixInput.value = '';
+                                                  return;
+                                              }
+                                              if (full.length > base.length + 1 && full.slice(-(base.length + 1)) === '.' + base) {
+                                                  suffixSelect.selectedIndex = i;
+                                                  prefixInput.value = full.slice(0, -(base.length + 1));
+                                                  return;
+                                              }
+                                          }
+                                          prefixInput.value = full;
+                                      }
+
+                                      prefixInput.addEventListener('input', compose);
+                                      prefixInput.addEventListener('change', compose);
+                                      suffixSelect.addEventListener('change', function () { fillCert(); compose(); });
+
+                                      splitExisting();
+                                      compose();
+                                  })();
+                              </script>
+                          </div>
+                      </div>
+                      <div class="form-group" id="scheme">
                         <label class="control-label font-bold" langtag="word-scheme"></label>
                         <div class="col-sm-10">
                             <select id="scheme_select" class="form-control" name="scheme">
