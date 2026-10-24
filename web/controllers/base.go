@@ -1,8 +1,10 @@
 package controllers
 
 import (
+	"fmt"
 	"html"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,33 +27,54 @@ type WebDomain struct {
 	Key  string
 }
 
-// getWebDomains 读取 nps.conf 里的候选域名，供「新增主机 / 编辑主机」下拉选择。
+// 域名形态校验：example.com、*.example.com、a-b.example.com
+var webDomainRe = regexp.MustCompile(`^(\*\.)?([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$`)
+
+// getWebDomains 读取 nps.conf 里的候选后缀，供「新增/编辑主机」下拉选择。
 //
-// 推荐写法（多行，一个域名一行，值 = 证书路径,私钥路径）：
+// 推荐写法（一行一个，普通键值，不会影响其它配置项）：
 //
-//	[web_domains]
-//	*.a.com = /conf/cert/a.com.pem,/conf/cert/a.com.key
-//	*.b.com =
+//	web_domain_1=*.a.com
+//	web_domain_1_cert=/conf/cert/a.com.pem
+//	web_domain_1_key=/conf/cert/a.com.key
+//	web_domain_2=plain.com
 //
-// 也兼容旧写法：web_domains=a.com,b.com（不带证书）
+// 兼容旧的 [web_domains] 段写法，但 ini 里段之后的所有键都会归到该段，
+// 段一旦不在文件末尾，后面的 web_port / tls_enable 等配置就会失效，所以只做兼容不再推荐。
 func getWebDomains() []WebDomain {
 	seen := make(map[string]bool)
 	domains := make([]WebDomain, 0, 4)
+	add := func(name, cert, key string) {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] || !webDomainRe.MatchString(name) {
+			return
+		}
+		seen[name] = true
+		domains = append(domains, WebDomain{Name: name, Cert: strings.TrimSpace(cert), Key: strings.TrimSpace(key)})
+	}
 
-	section, err := beego.AppConfig.GetSection("web_domains")
-	if err == nil && len(section) > 0 {
+	// 1) web_domain_N（推荐）
+	for i := 1; i <= 50; i++ {
+		prefix := fmt.Sprintf("web_domain_%d", i)
+		name := beego.AppConfig.String(prefix)
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		add(name, beego.AppConfig.String(prefix+"_cert"), beego.AppConfig.String(prefix+"_key"))
+	}
+	if len(domains) > 0 {
+		return domains
+	}
+
+	// 2) [web_domains] 段（兼容，且过滤掉被 ini 误并进来的普通配置键）
+	if section, err := beego.AppConfig.GetSection("web_domains"); err == nil && len(section) > 0 {
 		names := make([]string, 0, len(section))
 		for name := range section {
 			names = append(names, name)
 		}
 		sort.Strings(names)
-
 		for _, name := range names {
-			name = strings.TrimSpace(name)
-			if name == "" || seen[name] {
-				continue
-			}
-			d := WebDomain{Name: name}
+			d := WebDomain{Name: strings.TrimSpace(name)}
 			parts := strings.Split(section[name], ",")
 			if len(parts) > 0 {
 				d.Cert = strings.TrimSpace(parts[0])
@@ -59,24 +82,16 @@ func getWebDomains() []WebDomain {
 			if len(parts) > 1 {
 				d.Key = strings.TrimSpace(parts[1])
 			}
-			seen[name] = true
-			domains = append(domains, d)
+			add(d.Name, d.Cert, d.Key)
 		}
-		return domains
+		if len(domains) > 0 {
+			return domains
+		}
 	}
 
-	// 兼容旧写法：web_domains=a.com,b.com
-	raw := strings.TrimSpace(beego.AppConfig.String("web_domains"))
-	if raw == "" {
-		return nil
-	}
-	for _, part := range strings.Split(raw, ",") {
-		d := strings.TrimSpace(part)
-		if d == "" || seen[d] {
-			continue
-		}
-		seen[d] = true
-		domains = append(domains, WebDomain{Name: d})
+	// 3) 更老的逗号写法：web_domains=a.com,b.com
+	for _, part := range strings.Split(beego.AppConfig.String("web_domains"), ",") {
+		add(part, "", "")
 	}
 	return domains
 }

@@ -89,6 +89,19 @@ func main() {
 	logs.EnableFuncCallDepth(true)
 	logs.SetLogFuncCallDepth(3)
 
+	// [web_domains] 段写法只在文件末尾安全：段之后的所有键都会被 ini 解析器归到该段，
+	// tls_enable / open_captcha 这类配置就会读不到。检测到段里混入普通键时明确告警。
+	if section, err := beego.AppConfig.GetSection("web_domains"); err == nil && len(section) > 0 {
+		for k := range section {
+			if !strings.Contains(k, ".") {
+				// 这里日志适配器还没初始化，直接打到标准输出才能被 docker logs 看到
+				fmt.Printf("\n[W] [web_domains] 段里出现了非域名键 %q：段写法会把段之后的配置也吞进来，"+
+					"tls_enable / open_captcha 等会读不到；请改用 web_domain_1=域名 / web_domain_1_cert=证书 / web_domain_1_key=私钥\n\n", k)
+				break
+			}
+		}
+	}
+
 	if logPath == "" {
 		logPath := beego.AppConfig.String("log_path")
 		if logPath == "" {
@@ -589,8 +602,10 @@ web_password=123
 web_port = 8081
 web_ip=0.0.0.0
 web_base_url=
-#域名解析候选域名（一个域名一行，值=证书路径,私钥路径，可留空）
-[web_domains]
+#域名解析候选后缀（一行一个，证书与私钥路径可留空）
+#web_domain_1=*.a.com
+#web_domain_1_cert=/conf/cert/a.com.pem
+#web_domain_1_key=/conf/cert/a.com.key
 web_open_ssl=false
 web_cert_file=conf/server.pem
 web_key_file=conf/server.key
