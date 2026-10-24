@@ -3,6 +3,7 @@ package controllers
 import (
 	"html"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,23 +18,65 @@ import (
 	"github.com/astaxie/beego"
 )
 
-// getWebDomains 读取 nps.conf 里的 web_domains 配置（英文逗号分隔的候选域名）。
-// 用途：后台「新增主机 / 编辑主机」时，域名输入框会带出这些候选，可直接选。
-// 未配置时返回空切片，页面行为与原来一致（纯手填）。
-func getWebDomains() []string {
+// WebDomain 一个候选域名，带该域名对应的证书/私钥路径（路径可以为空）
+type WebDomain struct {
+	Name string
+	Cert string
+	Key  string
+}
+
+// getWebDomains 读取 nps.conf 里的候选域名，供「新增主机 / 编辑主机」下拉选择。
+//
+// 推荐写法（多行，一个域名一行，值 = 证书路径,私钥路径）：
+//
+//	[web_domains]
+//	*.a.com = /conf/cert/a.com.pem,/conf/cert/a.com.key
+//	*.b.com =
+//
+// 也兼容旧写法：web_domains=a.com,b.com（不带证书）
+func getWebDomains() []WebDomain {
+	seen := make(map[string]bool)
+	domains := make([]WebDomain, 0, 4)
+
+	section, err := beego.AppConfig.GetSection("web_domains")
+	if err == nil && len(section) > 0 {
+		names := make([]string, 0, len(section))
+		for name := range section {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		for _, name := range names {
+			name = strings.TrimSpace(name)
+			if name == "" || seen[name] {
+				continue
+			}
+			d := WebDomain{Name: name}
+			parts := strings.Split(section[name], ",")
+			if len(parts) > 0 {
+				d.Cert = strings.TrimSpace(parts[0])
+			}
+			if len(parts) > 1 {
+				d.Key = strings.TrimSpace(parts[1])
+			}
+			seen[name] = true
+			domains = append(domains, d)
+		}
+		return domains
+	}
+
+	// 兼容旧写法：web_domains=a.com,b.com
 	raw := strings.TrimSpace(beego.AppConfig.String("web_domains"))
 	if raw == "" {
 		return nil
 	}
-	seen := make(map[string]bool)
-	domains := make([]string, 0, 4)
 	for _, part := range strings.Split(raw, ",") {
 		d := strings.TrimSpace(part)
 		if d == "" || seen[d] {
 			continue
 		}
 		seen[d] = true
-		domains = append(domains, d)
+		domains = append(domains, WebDomain{Name: d})
 	}
 	return domains
 }

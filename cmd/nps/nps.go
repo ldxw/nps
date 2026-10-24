@@ -589,8 +589,8 @@ web_password=123
 web_port = 8081
 web_ip=0.0.0.0
 web_base_url=
-#域名解析候选域名，英文逗号分隔：web_domains=example.com,www.example.com
-web_domains=
+#域名解析候选域名（一个域名一行，值=证书路径,私钥路径，可留空）
+[web_domains]
 web_open_ssl=false
 web_cert_file=conf/server.pem
 web_key_file=conf/server.key

@@ -22,14 +22,34 @@
                     <div class="form-group">
                         <label class="control-label font-bold" langtag="word-host"></label>
                         <div class="col-sm-10">
-                            <input value="{{.h.Host}}" class="form-control" type="text" name="host" placeholder="" langtag="info-suchashost"{{if .domains}} list="web-domains"{{end}}>
+                            <input value="{{.h.Host}}" class="form-control" type="text" name="host" placeholder="" langtag="info-suchashost" list="web-domains">
                             {{if .domains}}
                             <datalist id="web-domains">
                                 {{range .domains}}
-                                <option value="{{.}}"></option>
+                                <option value="{{.Name}}"></option>
                                 {{end}}
                             </datalist>
-                            <small class="help-block">可选域名来自 nps.conf 的 web_domains 配置，也可以手动输入其它域名</small>
+                            <small class="help-block">可选域名来自 nps.conf 的 [web_domains] 配置，选中后会自动填好证书和私钥路径</small>
+                            <script>
+                                var NP_WEB_DOMAINS = {
+                                    {{range $i, $d := .domains}}{{if $i}},{{end}}"{{$d.Name}}": {cert: "{{$d.Cert}}", key: "{{$d.Key}}"}{{end}}
+                                };
+                                (function () {
+                                    var hostInput = document.querySelector('input[name="host"]');
+                                    if (!hostInput) { return; }
+                                    function fillFromDomain() {
+                                        var conf = NP_WEB_DOMAINS[hostInput.value];
+                                        if (!conf) { return; }
+                                        var cert = document.getElementById('pemText');
+                                        var key = document.getElementById('pemKey');
+                                        // 只在为空时自动填，避免覆盖用户已粘贴的内容
+                                        if (cert && conf.cert && !cert.value.trim()) { cert.value = conf.cert; }
+                                        if (key && conf.key && !key.value.trim()) { key.value = conf.key; }
+                                    }
+                                    hostInput.addEventListener('change', fillFromDomain);
+                                    hostInput.addEventListener('blur', fillFromDomain);
+                                })();
+                            </script>
                             {{end}}
                         </div>
                     </div>
