@@ -17,6 +17,27 @@ import (
 	"github.com/astaxie/beego"
 )
 
+// getWebDomains 读取 nps.conf 里的 web_domains 配置（英文逗号分隔的候选域名）。
+// 用途：后台「新增主机 / 编辑主机」时，域名输入框会带出这些候选，可直接选。
+// 未配置时返回空切片，页面行为与原来一致（纯手填）。
+func getWebDomains() []string {
+	raw := strings.TrimSpace(beego.AppConfig.String("web_domains"))
+	if raw == "" {
+		return nil
+	}
+	seen := make(map[string]bool)
+	domains := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		d := strings.TrimSpace(part)
+		if d == "" || seen[d] {
+			continue
+		}
+		seen[d] = true
+		domains = append(domains, d)
+	}
+	return domains
+}
+
 type BaseController struct {
 	beego.Controller
 	controllerName string

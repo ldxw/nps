@@ -331,6 +331,8 @@ func (s *IndexController) AddHost() {
 	if s.Ctx.Request.Method == "GET" {
 		s.Data["client_id"] = s.getEscapeString("client_id")
 		s.Data["menu"] = "host"
+		// nps.conf 里 web_domains 配置的候选域名，页面上可直接选
+		s.Data["domains"] = getWebDomains()
 		s.SetInfo("add host")
 		s.display("index/hadd")
 	} else {
@@ -373,6 +375,8 @@ func (s *IndexController) EditHost() {
 	id := s.GetIntNoErr("id")
 	if s.Ctx.Request.Method == "GET" {
 		s.Data["menu"] = "host"
+		// 同上：编辑时也给出候选域名
+		s.Data["domains"] = getWebDomains()
 		if h, err := file.GetDb().GetHostById(id); err != nil {
 			s.error()
 		} else {
