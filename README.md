@@ -1,6 +1,6 @@
 # NPS
 
-![Version](https://img.shields.io/badge/version-v0.26.39-blue)
+![Version](https://img.shields.io/badge/version-v0.26.40-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 ![Go](https://img.shields.io/badge/Go-%3E%3D1.22-00ADD8?logo=go)
 
@@ -12,7 +12,7 @@
 
 ---
 ## 💰 赞助 / 推荐
-#### 【腾讯云】[2核2G4M 服务器新客99元/年起](https://cloud.tencent.com/act/cps/redirect?redirect=6544&cps_key=de079542f18563fceb5c9b687dad2943&from=console)
+#### 【腾讯云】— [WorkBuddy 全场景 AI 办公工作台](https://curl.qcloud.com/Fw85I52h)
 
 ####  【NATNPS 云穿透】 — [无需自备服务器，注册即用，免费 3M 带宽 / 2 条隧道](https://natnps.com/register?utm_from=MQ==)
 

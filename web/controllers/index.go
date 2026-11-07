@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"ehang.io/nps/lib/file"
+	"ehang.io/nps/lib/install"
+	"ehang.io/nps/lib/version"
 	"ehang.io/nps/server"
 	"ehang.io/nps/server/tool"
 
@@ -21,6 +23,26 @@ func (s *IndexController) Index() {
 func (s *IndexController) Help() {
 	s.SetInfo("about")
 	s.display("index/help")
+}
+
+// CheckUpdate 检查是否有新版本，供 Web 首页异步展示
+func (s *IndexController) CheckUpdate() {
+	latest, hasUpdate, err := install.CheckLatestVersion()
+	if err != nil {
+		s.Data["json"] = map[string]interface{}{
+			"status": 0,
+			"msg":    "检查更新失败：" + err.Error(),
+		}
+	} else {
+		s.Data["json"] = map[string]interface{}{
+			"status":          1,
+			"has_update":      hasUpdate,
+			"current_version": version.VERSION,
+			"latest_version":  latest,
+		}
+	}
+	s.ServeJSON()
+	s.StopRun()
 }
 
 func (s *IndexController) Tcp() {
@@ -92,13 +114,11 @@ func (s *IndexController) Add() {
 		s.SetInfo("add tunnel")
 		s.display()
 	} else {
-		id := int(file.GetDb().JsonDb.GetTaskId())
 		t := &file.Tunnel{
 			Port:         s.GetIntNoErr("port"),
 			ServerIp:     s.getEscapeString("server_ip"),
 			Mode:         s.getEscapeString("type"),
 			Target:       &file.Target{TargetStr: s.getEscapeString("target"), LocalProxy: s.GetBoolNoErr("local_proxy")},
-			Id:           id,
 			Status:       true,
 			Remark:       s.getEscapeString("remark"),
 			Password:     s.getEscapeString("password"),
@@ -108,28 +128,43 @@ func (s *IndexController) Add() {
 			Flow:         &file.Flow{},
 		}
 
+		if msg := validateTunnelInput(t.Mode, t.Target.TargetStr, t.Password, t.LocalPath); msg != "" {
+			s.AjaxErr(msg)
+			return
+		}
+		clientId := s.GetIntNoErr("client_id")
+		if clientId <= 0 {
+			s.AjaxErr("client is required")
+			return
+		}
+
 		if t.Port <= 0 {
 			t.Port = tool.GenerateServerPort(t.Mode)
 		}
 
 		if !tool.TestServerPort(t.Port, t.Mode) {
 			s.AjaxErr("The port cannot be opened because it may has been occupied or is no longer allowed.")
+			return
 		}
-		var err error
-		if t.Client, err = file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
+		client, err := file.GetDb().GetClient(clientId)
+		if err != nil {
 			s.AjaxErr(err.Error())
+			return
 		}
-		if t.Client.MaxTunnelNum != 0 && t.Client.GetTunnelNum() >= t.Client.MaxTunnelNum {
+		t.Client = client
+		if client.MaxTunnelNum != 0 && client.GetTunnelNum() >= client.MaxTunnelNum {
 			s.AjaxErr("The number of tunnels exceeds the limit")
+			return
 		}
 		if err := file.GetDb().NewTask(t); err != nil {
 			s.AjaxErr(err.Error())
+			return
 		}
 		if err := server.AddTask(t); err != nil {
 			s.AjaxErr(err.Error())
-		} else {
-			s.AjaxOkWithId("add success", id)
+			return
 		}
+		s.AjaxOkWithId("add success", t.Id)
 	}
 }
 
@@ -145,14 +180,12 @@ func (s *IndexController) Copy() {
 			oldTask.Client = client
 		}
 
-		id := int(file.GetDb().JsonDb.GetTaskId())
 		newTask := &file.Tunnel{
 			Client:       oldTask.Client,
 			Port:         tool.GenerateServerPort(oldTask.Mode),
 			ServerIp:     oldTask.ServerIp,
 			Mode:         oldTask.Mode,
 			Target:       oldTask.Target,
-			Id:           id,
 			Status:       true,
 			Remark:       oldTask.Remark,
 			Password:     oldTask.Password,
@@ -163,19 +196,22 @@ func (s *IndexController) Copy() {
 		}
 		if !tool.TestServerPort(newTask.Port, newTask.Mode) {
 			s.AjaxErr("The port cannot be opened because it may has been occupied or is no longer allowed.")
+			return
 		}
 
 		if newTask.Client.MaxTunnelNum != 0 && newTask.Client.GetTunnelNum() >= newTask.Client.MaxTunnelNum {
 			s.AjaxErr("The number of tunnels exceeds the limit")
+			return
 		}
 		if err := file.GetDb().NewTask(newTask); err != nil {
 			s.AjaxErr(err.Error())
+			return
 		}
 		if err := server.AddTask(newTask); err != nil {
 			s.AjaxErr(err.Error())
-		} else {
-			s.AjaxOkWithId("add success", id)
+			return
 		}
+		s.AjaxOkWithId("add success", newTask.Id)
 	}
 }
 
@@ -205,12 +241,26 @@ func (s *IndexController) Edit() {
 		if t, err := file.GetDb().GetTask(id); err != nil {
 			s.error()
 		} else {
-			if client, err := file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
+			mode := s.getEscapeString("type")
+			target := s.getEscapeString("target")
+			password := s.getEscapeString("password")
+			localPath := s.getEscapeString("local_path")
+			if msg := validateTunnelInput(mode, target, password, localPath); msg != "" {
+				s.AjaxErr(msg)
+				return
+			}
+			clientId := s.GetIntNoErr("client_id")
+			if clientId <= 0 {
+				s.AjaxErr("client is required")
+				return
+			}
+			if client, err := file.GetDb().GetClient(clientId); err != nil {
 				s.AjaxErr("modified error,the client is not exist")
 				return
 			} else {
 				t.Client = client
 			}
+			t.Mode = mode
 			if s.GetIntNoErr("port") != t.Port {
 				t.Port = s.GetIntNoErr("port")
 
@@ -224,11 +274,10 @@ func (s *IndexController) Edit() {
 				}
 			}
 			t.ServerIp = s.getEscapeString("server_ip")
-			t.Mode = s.getEscapeString("type")
-			t.Target = &file.Target{TargetStr: s.getEscapeString("target")}
-			t.Password = s.getEscapeString("password")
+			t.Target = &file.Target{TargetStr: target}
+			t.Password = password
 			t.Id = id
-			t.LocalPath = s.getEscapeString("local_path")
+			t.LocalPath = localPath
 			t.ProtoVersion = s.getEscapeString("proto_version")
 			t.StripPre = s.getEscapeString("strip_pre")
 			t.Remark = s.getEscapeString("remark")
@@ -251,6 +300,7 @@ func (s *IndexController) Stop() {
 	id := s.GetIntNoErr("id")
 	if err := server.StopServer(id); err != nil {
 		s.AjaxErr("stop error")
+		return
 	}
 	s.AjaxOk("stop success")
 }
@@ -259,6 +309,7 @@ func (s *IndexController) Del() {
 	id := s.GetIntNoErr("id")
 	if err := server.DelTask(id); err != nil {
 		s.AjaxErr("delete error")
+		return
 	}
 	s.AjaxOk("delete success")
 }
@@ -267,6 +318,7 @@ func (s *IndexController) Start() {
 	id := s.GetIntNoErr("id")
 	if err := server.StartTask(id); err != nil {
 		s.AjaxErr("start error")
+		return
 	}
 	s.AjaxOk("start success")
 }
@@ -303,6 +355,7 @@ func (s *IndexController) DelHost() {
 	id := s.GetIntNoErr("id")
 	if err := file.GetDb().DelHost(id); err != nil {
 		s.AjaxErr("delete error")
+		return
 	}
 	s.AjaxOk("delete success")
 }
@@ -311,6 +364,7 @@ func (s *IndexController) HostStop() {
 	id := s.GetIntNoErr("id")
 	if h, err := file.GetDb().GetHostById(id); err != nil {
 		s.AjaxErr("stop error")
+		return
 	} else {
 		h.IsClose = true
 	}
@@ -321,6 +375,7 @@ func (s *IndexController) HostStart() {
 	id := s.GetIntNoErr("id")
 	if h, err := file.GetDb().GetHostById(id); err != nil {
 		s.AjaxErr("start error")
+		return
 	} else {
 		h.IsClose = false
 	}
@@ -336,11 +391,20 @@ func (s *IndexController) AddHost() {
 		s.SetInfo("add host")
 		s.display("index/hadd")
 	} else {
-		id := int(file.GetDb().JsonDb.GetHostId())
+		host := s.getEscapeString("host")
+		target := s.getEscapeString("target")
+		if msg := validateHostInput(host, target); msg != "" {
+			s.AjaxErr(msg)
+			return
+		}
+		clientId := s.GetIntNoErr("client_id")
+		if clientId <= 0 {
+			s.AjaxErr("client is required")
+			return
+		}
 		h := &file.Host{
-			Id:           id,
-			Host:         s.getEscapeString("host"),
-			Target:       &file.Target{TargetStr: s.getEscapeString("target"), LocalProxy: s.GetBoolNoErr("local_proxy")},
+			Host:         host,
+			Target:       &file.Target{TargetStr: target, LocalProxy: s.GetBoolNoErr("local_proxy")},
 			HeaderChange: s.getEscapeString("header"),
 			HostChange:   s.getEscapeString("hostchange"),
 			Remark:       s.getEscapeString("remark"),
@@ -356,18 +420,22 @@ func (s *IndexController) AddHost() {
 			h.AutoHttps = false
 		}
 
-		var err error
-		if h.Client, err = file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
+		client, err := file.GetDb().GetClient(clientId)
+		if err != nil {
 			s.AjaxErr("add error the client can not be found")
+			return
 		}
-		if h.Client.MaxTunnelNum != 0 && h.Client.GetTunnelNum() >= h.Client.MaxTunnelNum {
+		h.Client = client
+		if client.MaxTunnelNum != 0 && client.GetTunnelNum() >= client.MaxTunnelNum {
 			s.AjaxErr("The number of tunnels exceeds the limit")
+			return
 		}
 
 		if err := file.GetDb().NewHost(h); err != nil {
 			s.AjaxErr("add fail" + err.Error())
+			return
 		}
-		s.AjaxOkWithId("add success", id)
+		s.AjaxOkWithId("add success", h.Id)
 	}
 }
 
@@ -388,9 +456,20 @@ func (s *IndexController) EditHost() {
 		if h, err := file.GetDb().GetHostById(id); err != nil {
 			s.error()
 		} else {
-			if h.Host != s.getEscapeString("host") {
+			host := s.getEscapeString("host")
+			target := s.getEscapeString("target")
+			if msg := validateHostInput(host, target); msg != "" {
+				s.AjaxErr(msg)
+				return
+			}
+			clientId := s.GetIntNoErr("client_id")
+			if clientId <= 0 {
+				s.AjaxErr("client is required")
+				return
+			}
+			if h.Host != host {
 				tmpHost := new(file.Host)
-				tmpHost.Host = s.getEscapeString("host")
+				tmpHost.Host = host
 				tmpHost.Location = s.getEscapeString("location")
 				tmpHost.Scheme = s.getEscapeString("scheme")
 				if file.GetDb().IsHostExist(tmpHost) {
@@ -398,13 +477,14 @@ func (s *IndexController) EditHost() {
 					return
 				}
 			}
-			if client, err := file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
+			if client, err := file.GetDb().GetClient(clientId); err != nil {
 				s.AjaxErr("modified error,the client is not exist")
+				return
 			} else {
 				h.Client = client
 			}
-			h.Host = s.getEscapeString("host")
-			h.Target = &file.Target{TargetStr: s.getEscapeString("target")}
+			h.Host = host
+			h.Target = &file.Target{TargetStr: target}
 			h.HeaderChange = s.getEscapeString("header")
 			h.HostChange = s.getEscapeString("hostchange")
 			h.Remark = s.getEscapeString("remark")
